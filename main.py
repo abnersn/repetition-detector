@@ -1,3 +1,4 @@
+import os, sys
 import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
@@ -6,83 +7,57 @@ from sklearn.metrics import pairwise_distances
 import time
 import pathlib
 
-# Display images in a grid
-def display_images(images, size=10):
-  if type(images) == dict:
-    images_labels = [k for k in images.keys()]
-  else:
-    images_labels = [k for k in range(len(images))]
-  grid_size = int(np.ceil(np.sqrt(len(images_labels))))
-  for i in range(grid_size):
-    fig = plt.figure(figsize=(size, size))
-    for j in range(grid_size):
-      index = i * grid_size + j
-      if index >= len(images_labels):
-          break
-      label = images_labels[index]
-      image = images[label]
-      ax = fig.add_subplot(grid_size, grid_size, index + 1)
-      ax.imshow(image)
-      ax.set_xticks([])
-      ax.set_yticks([])
-      if type(label) == str:
-        ax.set_xlabel(label)
-    plt.show()
-
-plt.rcParams['image.cmap'] = 'gray'
-
 # Computes Gabor filters
 angles = [i / 5 for i in range(5)]
-sigmas = [1, 2, 4]
-lambdas = [2, 3]
-size = 15
+size = 3
 
 filters = []
+filter_names = []
 for angle in angles:
-  for sigma in sigmas:
-    for l in lambdas:
-      args = {
-        "ksize": (size, size),
-        "sigma": sigma * size / 20,
-        "theta": angle * np.pi,
-        "lambd": size / l,
-        "gamma": 1
-      }
-      kernel = cv.getGaborKernel(**args)
-      filters.append(kernel)
-
-print(len(filters))
-display_images(filters)
+  args = {
+    "ksize": (size, size),
+    "sigma": 0.75,
+    "theta": angle * np.pi,
+    "lambd": 7.5,
+    "gamma": 1
+  }
+  kernel = cv.getGaborKernel(**args)
+  filters.append(kernel)
+  filter_names.append('t = {}'.format(angle))
 
 # Load image
-image = cv.imread("samples/img1.jpg")
+image = cv.imread("samples/portinari.jpg")
 image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
-image = cv.resize(image, (512, 512))
 
 r = cv.normalize(image[:, :, 0], cv.NORM_MINMAX, dtype=cv.CV_32F)
 g = cv.normalize(image[:, :, 1], cv.NORM_MINMAX, dtype=cv.CV_32F)
 b = cv.normalize(image[:, :, 2], cv.NORM_MINMAX, dtype=cv.CV_32F)
 
 # Computes color maps
-CM = {
-  'RG': (r - g) / 2,
-  'BY': (r + g - 2*b) / 4,
-  'I': (r + g + b) / 3,
-  'S': (np.amax(image, axis=2) - np.amin(image, axis=2)) / 2
-}
+color_maps = np.stack([
+  (r - g) / 2,
+  (r + g - 2*b) / 4,
+  (r + g + b) / 3,
+  (np.amax(image, axis=2) - np.amin(image, axis=2)) / 2
+], axis=2).astype(np.float32)
 
-# Display Color Maps
-display_images(CM)
-
-plt.rcParams['image.cmap'] = 'plasma'
-
-# Computes gabor filters for each CM
+# Computes feature maps
 feature_maps = []
-for color_map in CM.values():
-  for kernel in filters:
-    f_map = cv.filter2D(color_map, cv.CV_32F, kernel)
-    feature_maps.append(f_map)
-display_images(feature_maps[:8:])
+for kernel in filters:
+  maps = cv.filter2D(color_maps, cv.CV_32F, kernel)
+  feature_maps.append(maps)
+feature_maps = np.concatenate(feature_maps, axis=2)
+
+print(feature_maps.shape)
+
+for i in range(feature_maps.shape[-1]):
+  norm = cv.normalize(feature_maps[:, :, i], cv.NORM_MINMAX)
+  norm = (norm > 0.1 * norm.max()).astype(np.uint8) * 255
+  cv.imshow('image', norm)
+  k = cv.waitKey(0)
+  print(filter_names[i % len(filters)], k)
+
+sys.exit()
 
 def compute_roundness(patch):
   contours = cv.findContours(patch, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)[1][0].squeeze()
@@ -163,9 +138,6 @@ def process_feature_map(f_map):
   return result
 
 s_maps = list(map(process_feature_map, feature_maps))
-display_images(s_maps[:4:])
-
-plt.rcParams['image.cmap'] = 'plasma'
 
 computed = np.stack(s_maps, axis=2)
 final = np.amax(computed, axis=2)
