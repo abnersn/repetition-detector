@@ -4,6 +4,7 @@ from PIL import Image
 from cv2.cv2 import DescriptorMatcher
 from scipy.spatial.distance import hamming
 from scipy.stats import mode
+from skimage import img_as_ubyte
 from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
@@ -13,7 +14,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-WINDOW_SIZE=32
+WINDOW_SIZE=16
 RADIUS=3
 
 def hamming_pairwise_distances(X):
@@ -30,8 +31,18 @@ def hamming_pairwise_distances(X):
     X_bin = X_bin[:, :, None] ^ X_bin.T[None, :, :]
     return X_bin.sum(axis=1)
 
+def patchify(img, patch_shape):
+    X, Y, a = img.shape
+    x, y = patch_shape
+    shape = (X - x + 1, Y - y + 1, x, y, a)
+    X_str, Y_str, a_str = img.strides
+    strides = (X_str, Y_str, X_str, Y_str, a_str)
+    return np.lib.stride_tricks.as_strided(img, shape=shape, strides=strides)
+
 # Loads image
-image = np.array(Image.open('samples/img1.jpg'))
+image = np.array(Image.open('samples/img2.jpg'))
+image = cv.resize(image, (512, 512))
+gray = img_as_ubyte(cv.cvtColor(image, cv.COLOR_RGB2GRAY))
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=500)
@@ -48,36 +59,22 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
-# Computes image LBP
-image_lbp = local_binary_pattern(cv.cvtColor(image, cv.COLOR_BGR2GRAY), RADIUS, 8*RADIUS)
-descriptors = np.zeros((len(kps), 256))
-for i in range(len(kps)):
-    kp = kps[i]
-    x_l = max(int(kp[1]) - WINDOW_SIZE // 2, 0)
-    x_r = min(int(kp[1]) + WINDOW_SIZE // 2, image.shape[0])
-    y_l = max(int(kp[0]) - WINDOW_SIZE // 2, 0)
-    y_r = min(int(kp[0]) + WINDOW_SIZE // 2, image.shape[1])
-    patch = image_lbp[x_l:x_r, y_l:y_r]
-    descriptors[i] = np.histogram(patch.ravel(), bins=256, range=(0, 255))[0]
-descriptors = descriptors / descriptors.sum(axis=1)[:, None]
+# Gets a single patch from the most frequent feature
+x, y = kps[labels == mode(labels)[0]][0].astype(int)
+patch = gray[y-WINDOW_SIZE//2:y+WINDOW_SIZE//2, x-WINDOW_SIZE//2:x+WINDOW_SIZE//2]
+patch = patch.flatten()
+patch = (patch - patch.mean()) / patch.std()
 
-pca = PCA(n_components=10)
-x = pca.fit_transform(descriptors)
+p = patchify(gray[:,:,None], (WINDOW_SIZE, WINDOW_SIZE)).astype(np.float32)
 
-# Gets a single descriptor from the most frequent feature
-main_descriptor = x[labels == mode(labels)[0]][0]
+p = p.reshape((p.shape[0], p.shape[1], -1))
+p = p - p.mean(axis=2)[:,:,None]
+p = p / (1.0e-4 + p.std(axis=2)[:,:,None])
+p = p * patch
+p = p.sum(axis=2)
 
-gm = GaussianMixture(n_components=10)
-y = gm.fit_predict(x)
-
-fig = plt.figure()
-ax = fig.add_subplot()
-ax.imshow(image)
-ax.scatter(kps[:, 0], kps[:, 1], c=y)
-
-fig = plt.figure()
-ax = fig.add_subplot()
-ax.scatter(x[:, 0], x[:, 1], c=y)
-ax.scatter([main_descriptor[0]], [main_descriptor[1]], c='red')
-
+plt.imshow(p)
 plt.show()
+
+
+# Computes distance between such descriptor and the others.
