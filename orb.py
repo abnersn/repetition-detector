@@ -9,6 +9,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.metrics import pairwise_fast, pairwise_distances
+from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -30,7 +31,7 @@ def hamming_pairwise_distances(X):
     return X_bin.sum(axis=1)
 
 # Loads image
-image = np.array(Image.open('samples/portinari.jpg'))
+image = np.array(Image.open('samples/img1.jpg'))
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=500)
@@ -46,16 +47,6 @@ distances = hamming_pairwise_distances(dsc)
 margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
-
-# Gets features from largest cluster and ignore the rest
-kps = kps[labels == mode(labels)[0]]
-labels = labels[labels == mode(labels)[0]]
-
-# Gets a single keypoint and the bounding box around it
-main_point = kps[0]
-x, y = main_point - 32
-x, y = int(x), int(y)
-image[y:y+64, x:x+64] *= 0
 
 # Computes image LBP
 image_lbp = local_binary_pattern(cv.cvtColor(image, cv.COLOR_BGR2GRAY), RADIUS, 8*RADIUS)
@@ -73,9 +64,20 @@ descriptors = descriptors / descriptors.sum(axis=1)[:, None]
 pca = PCA(n_components=10)
 x = pca.fit_transform(descriptors)
 
+# Gets a single descriptor from the most frequent feature
+main_descriptor = x[labels == mode(labels)[0]][0]
+
+gm = GaussianMixture(n_components=10)
+y = gm.fit_predict(x)
+
 fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-# ax.imshow(image)
-ax.scatter(x[:, 0], x[:, 1],x[:, 2], c='blue')
-print(sum(pca.explained_variance_ratio_))
+ax = fig.add_subplot()
+ax.imshow(image)
+ax.scatter(kps[:, 0], kps[:, 1], c=y)
+
+fig = plt.figure()
+ax = fig.add_subplot()
+ax.scatter(x[:, 0], x[:, 1], c=y)
+ax.scatter([main_descriptor[0]], [main_descriptor[1]], c='red')
+
 plt.show()
