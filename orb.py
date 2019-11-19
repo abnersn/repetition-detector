@@ -4,7 +4,7 @@ from PIL import Image
 from cv2.cv2 import DescriptorMatcher
 from scipy.spatial.distance import hamming
 from scipy.stats import mode
-from skimage import img_as_ubyte
+from skimage import filters
 from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
@@ -14,8 +14,12 @@ from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
+from main import filters
+
 WINDOW_SIZE=16
-RADIUS=3
+THRESHOLD=0.7
+BLUR=False
+IMAGE='samples/img3.jpg'
 
 def hamming_pairwise_distances(X):
     """
@@ -40,9 +44,10 @@ def patchify(img, patch_shape):
     return np.lib.stride_tricks.as_strided(img, shape=shape, strides=strides)
 
 # Loads image
-image = np.array(Image.open('samples/img2.jpg'))
-image = cv.resize(image, (512, 512))
-gray = img_as_ubyte(cv.cvtColor(image, cv.COLOR_RGB2GRAY))
+image = np.array(Image.open(IMAGE))
+# image = cv.resize(image, (512, 512))
+gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
+gray = cv.Canny(gray, 255//3, 255).astype(bool)
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=500)
@@ -63,17 +68,20 @@ labels = clusterizer.fit_predict(distances)
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
 patch = gray[y-WINDOW_SIZE//2:y+WINDOW_SIZE//2, x-WINDOW_SIZE//2:x+WINDOW_SIZE//2]
 patch = patch.flatten()
-patch = (patch - patch.mean()) / patch.std()
 
-p = patchify(gray[:,:,None], (WINDOW_SIZE, WINDOW_SIZE)).astype(np.float32)
+p = patchify(gray[:,:,None], (WINDOW_SIZE, WINDOW_SIZE))
 
 p = p.reshape((p.shape[0], p.shape[1], -1))
-p = p - p.mean(axis=2)[:,:,None]
-p = p / (1.0e-4 + p.std(axis=2)[:,:,None])
-p = p * patch
+
+# p = p - p.mean(axis=2)[:,:,None]
+# p = p / (1.0e-4 + p.std(axis=2)[:,:,None])
+p = p ^ patch
 p = p.sum(axis=2)
 
-plt.imshow(p)
+if BLUR:
+    p = filters.gaussian(p)
+
+plt.imshow(p > THRESHOLD*p.max())
 plt.show()
 
 
