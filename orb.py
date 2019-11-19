@@ -1,19 +1,50 @@
 import numpy as np
 import cv2 as cv
 from PIL import Image
+import gc
 from cv2.cv2 import DescriptorMatcher
+from matplotlib.patches import Rectangle
+from scipy.spatial import distance
 from scipy.spatial.distance import hamming
 from scipy.stats import mode
+from skimage import img_as_ubyte
 from skimage.feature import local_binary_pattern
+from skimage.filters import rank
+from skimage.morphology import selem
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.metrics import pairwise_fast, pairwise_distances
+from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-WINDOW_SIZE=32
+WINDOW_SIZE=64
 RADIUS=3
+
+def windowed_histogram_similarity(image, selem, reference_hist):
+    # Compute normalized windowed histogram feature vector for each pixel
+    px_histograms = rank.windowed_histogram(image, selem, n_bins=256).astype(np.float32)
+
+    # Reshape coin histogram to (1,1,N) for broadcast when we want to use it in
+    # arithmetic operations with the windowed histograms from the image
+    reference_hist = reference_hist.reshape((1, 1) + reference_hist.shape)
+
+    # Compute Chi squared distance metric: sum((X-Y)^2 / (X+Y));
+    # a measure of distance between histograms
+    X = px_histograms
+    Y = reference_hist
+
+    frac = (X - Y) ** 2 / (X + Y + 1.0e-4)
+
+    chi_sqr = 0.5 * np.sum(frac, axis=2)
+
+    # Generate a similarity measure. It needs to be low when distance is high
+    # and high when distance is low; taking the reciprocal will do this.
+    # Chi squared will always be >= 0, add small value to prevent divide by 0.
+    similarity = 1 / (chi_sqr + 1.0e-4)
+
+    return similarity
 
 def hamming_pairwise_distances(X):
     """
@@ -31,6 +62,7 @@ def hamming_pairwise_distances(X):
 
 # Loads image
 image = np.array(Image.open('samples/portinari.jpg'))
+image = cv.resize(image, (512, 512))
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=500)
@@ -47,35 +79,40 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
-# Gets features from largest cluster and ignore the rest
-kps = kps[labels == mode(labels)[0]]
-labels = labels[labels == mode(labels)[0]]
+# Gets one feature bbox from largest cluster
+ref = kps[labels == mode(labels)[0]][0]
 
-# Gets a single keypoint and the bounding box around it
-main_point = kps[0]
-x, y = main_point - 32
-x, y = int(x), int(y)
-image[y:y+64, x:x+64] *= 0
+gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+image_lbp = local_binary_pattern(gray, RADIUS, 8*RADIUS).astype(np.uint8)
 
-# Computes image LBP
-image_lbp = local_binary_pattern(cv.cvtColor(image, cv.COLOR_BGR2GRAY), RADIUS, 8*RADIUS)
-descriptors = np.zeros((len(kps), 256))
-for i in range(len(kps)):
-    kp = kps[i]
-    x_l = max(int(kp[1]) - WINDOW_SIZE // 2, 0)
-    x_r = min(int(kp[1]) + WINDOW_SIZE // 2, image.shape[0])
-    y_l = max(int(kp[0]) - WINDOW_SIZE // 2, 0)
-    y_r = min(int(kp[0]) + WINDOW_SIZE // 2, image.shape[1])
-    patch = image_lbp[x_l:x_r, y_l:y_r]
-    descriptors[i] = np.histogram(patch.ravel(), bins=256, range=(0, 255))[0]
-descriptors = descriptors / descriptors.sum(axis=1)[:, None]
+x_l = max(int(ref[1]) - WINDOW_SIZE // 2, 0)
+x_r = min(int(ref[1]) + WINDOW_SIZE // 2, image.shape[0])
+y_l = max(int(ref[0]) - WINDOW_SIZE // 2, 0)
+y_r = min(int(ref[0]) + WINDOW_SIZE // 2, image.shape[1])
 
-pca = PCA(n_components=10)
-x = pca.fit_transform(descriptors)
+patch = image_lbp[x_l:x_r, y_l:y_r]
 
-fig = plt.figure()
-ax = fig.add_subplot(111, projection='3d')
-# ax.imshow(image)
-ax.scatter(x[:, 0], x[:, 1],x[:, 2], c='blue')
-print(sum(pca.explained_variance_ratio_))
+patch_descriptor = np.histogram(patch.ravel(), bins=256, range=(0, 255))[0]
+patch_descriptor = patch_descriptor.astype(float) / patch_descriptor.sum()
+
+selem = selem.disk(WINDOW_SIZE // 2)
+
+sim = windowed_histogram_similarity(image_lbp, selem, patch_descriptor)
+
+fig, ax = plt.subplots()
+ax.imshow(image)
+ax.imshow(sim, cmap='hot', alpha=0.5)
 plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
