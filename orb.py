@@ -10,20 +10,20 @@ from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
 
-from util import hamming_pairwise_distances, patchify
+import util
 
 WINDOW_SIZE=16
 PERCENTILE=5
 BLUR=True
 ORB_FEATURES=200
-IMAGE='samples/portinari.jpg'
+IMAGE='samples/img4.jpg'
 
-start = time()
 # Loads image
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
-gray = cv.Canny(gray, 255//2, 255).astype(bool)
+edges = cv.Canny(gray, 255 // 2, 255).astype(bool)
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=ORB_FEATURES)
@@ -33,7 +33,7 @@ _, dsc = extractor.compute(image, kps)
 kps = np.array([k.pt for k in kps])
 
 # Computes distances between each descriptor
-distances = hamming_pairwise_distances(dsc)
+distances = util.hamming_pairwise_distances(dsc)
 
 # Clusterize by DBSCAN
 margin = np.quantile(distances, 0.04)
@@ -42,10 +42,10 @@ labels = clusterizer.fit_predict(distances)
 
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
-patch = gray[y-WINDOW_SIZE//2:y+WINDOW_SIZE//2, x-WINDOW_SIZE//2:x+WINDOW_SIZE//2]
+patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
 patch = patch.flatten()
 
-patches = patchify(gray[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
+patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
 patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
 patches = patches ^ patch
 similarity_map = patches.sum(axis=2)
@@ -64,34 +64,43 @@ filter_size = filter_size * 2 + 1
 binary_similarity_map = cv.medianBlur(binary_similarity_map, filter_size)
 binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 2, filter_size + 2), np.uint8))
 
-# Computes bounding boxes and descriptors for each one of them
+# Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
 stats = np.delete(stats, 0, 0)
-hog = cv.HOGDescriptor()
-lbp = local_binary_pattern(cv.cvtColor(image, cv.COLOR_RGB2GRAY), 24,3)
-bboxes = []
-descs = []
-for stat in stats:
+features = np.zeros((stats.shape[0], 144), dtype=np.float32)
+for i, stat in enumerate(stats):
     x, y, w, h, a = stat
-    bpatch = lbp[y-5:y+h+10, x-5:x+w+10]
-    descs.append(np.histogram(bpatch, 256)[0])
-    bboxes.append(image[y-5:y+h+10, x-5:x+w+10])
-descs = np.array(descs)
-pca = PCA(n_components=2)
-y = pca.fit_transform(descs)
-fig, ax = plt.subplots()
-ax.scatter(y[:,0], y[:,1])
-plt.show()
-end = time()
+    bbox = gray[y:y+h, x:x+h]
+    features[i] = util.compute_features(bbox)
 
-print('Total running time: {}'.format(end - start))
+distances = np.zeros((features.shape[0], features.shape[0]))
+for i in range(features.shape[0]):
+    for j in range(features.shape[0]):
+        distances[i, j] = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
+limiar = np.percentile(distances, 30)
+
+distances = (distances <= limiar).sum(axis=1)
+
+# print(limiar, distances[90, 92])
+# input()
+
+# boxes = [90,92]
+# for b in boxes:
+#     fig, ax = plt.subplots()
+#     f = features[b]
+#     ax.bar(np.arange(len(f)), f)
+#     plt.show()
+
 
 fig, ax = plt.subplots()
 ax.imshow(image)
-for stat in stats:
+for i, stat in enumerate(stats):
+    matches = distances[i]
     x, y, w, h, a = stat
-    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='r',facecolor='none')
+    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='b',facecolor='none')
     ax.add_patch(r)
+    ax.text(x, y, str(matches))
+
 
 # ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
 plt.show()

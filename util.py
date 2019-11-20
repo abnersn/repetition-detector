@@ -1,4 +1,5 @@
 import numpy as np
+import cv2 as cv
 
 def hamming_pairwise_distances(X):
     """
@@ -28,3 +29,20 @@ def patchify(img, patch_shape):
     X_str, Y_str, a_str = img.strides
     strides = (X_str, Y_str, X_str, Y_str, a_str)
     return np.lib.stride_tricks.as_strided(img, shape=shape, strides=strides)
+
+def gridify(array, cells):
+    grid = [np.array_split(b, cells, axis=1) for b in np.array_split(array, cells, axis=0)]
+    return [g for v in grid for g in v]
+
+def compute_features(image, nbins=16, cells=3):
+    dx = cv.Sobel(image, cv.CV_32F, 1, 0, ksize=1)
+    dy = cv.Sobel(image, cv.CV_32F, 0, 1, ksize=1)
+    mag, angle = cv.cartToPolar(dx, dy, angleInDegrees=True)
+    mag_grid = gridify(mag, cells)
+    angle_grid = gridify(angle, cells)
+    feature = np.zeros((cells**2, 16))
+    for i in range(cells ** 2):
+        feature[i] = np.histogram(angle_grid[i].flatten(), nbins, weights=mag_grid[i].flatten())[0]
+        feature[i] /= (1e-4 + np.sqrt(feature[i].dot(feature[i])))
+    return feature.flatten()
+
