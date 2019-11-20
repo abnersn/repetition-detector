@@ -3,10 +3,13 @@ from time import time
 import numpy as np
 import cv2 as cv
 from PIL import Image
+from matplotlib.patches import Rectangle
 from scipy.stats import mode
 from skimage import filters
+from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 from util import hamming_pairwise_distances, patchify
 
@@ -14,7 +17,7 @@ WINDOW_SIZE=16
 PERCENTILE=5
 BLUR=True
 ORB_FEATURES=200
-IMAGE='samples/img4.jpg'
+IMAGE='samples/portinari.jpg'
 
 start = time()
 # Loads image
@@ -61,11 +64,34 @@ filter_size = filter_size * 2 + 1
 binary_similarity_map = cv.medianBlur(binary_similarity_map, filter_size)
 binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 2, filter_size + 2), np.uint8))
 
+# Computes bounding boxes and descriptors for each one of them
+_, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
+stats = np.delete(stats, 0, 0)
+hog = cv.HOGDescriptor()
+lbp = local_binary_pattern(cv.cvtColor(image, cv.COLOR_RGB2GRAY), 24,3)
+bboxes = []
+descs = []
+for stat in stats:
+    x, y, w, h, a = stat
+    bpatch = lbp[y-5:y+h+10, x-5:x+w+10]
+    descs.append(np.histogram(bpatch, 256)[0])
+    bboxes.append(image[y-5:y+h+10, x-5:x+w+10])
+descs = np.array(descs)
+pca = PCA(n_components=2)
+y = pca.fit_transform(descs)
+fig, ax = plt.subplots()
+ax.scatter(y[:,0], y[:,1])
+plt.show()
 end = time()
 
 print('Total running time: {}'.format(end - start))
 
-plt.figure(1)
-plt.imshow(image)
-plt.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
+fig, ax = plt.subplots()
+ax.imshow(image)
+for stat in stats:
+    x, y, w, h, a = stat
+    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='r',facecolor='none')
+    ax.add_patch(r)
+
+# ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
 plt.show()
