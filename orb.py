@@ -18,7 +18,7 @@ WINDOW_SIZE=16
 PERCENTILE=5
 BLUR=True
 ORB_FEATURES=200
-IMAGE='samples/img4.jpg'
+IMAGE='samples/img3.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
@@ -40,6 +40,10 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
+# plt.imshow(image)
+# plt.scatter(kps[:, 0], kps[:, 1], labels, c='yellow')
+# plt.show()
+
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
 patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
@@ -52,6 +56,9 @@ similarity_map = patches.sum(axis=2)
 
 if BLUR:
     similarity_map = filters.gaussian(similarity_map)
+
+# plt.imshow(similarity_map)
+# plt.show()
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
@@ -67,17 +74,24 @@ binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
 stats = np.delete(stats, 0, 0)
-features = np.zeros((stats.shape[0], 144), dtype=np.float32)
+n_bins = 40
+cells = 4
+features = np.zeros((stats.shape[0], n_bins * cells**2), dtype=np.float32)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
     bbox = gray[y:y+h, x:x+h]
-    features[i] = util.compute_features(bbox)
+    features[i] = util.compute_features(bbox, n_bins, cells)
 
 distances = np.zeros((features.shape[0], features.shape[0]))
 for i in range(features.shape[0]):
     for j in range(features.shape[0]):
-        distances[i, j] = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
-limiar = np.percentile(distances, 30)
+        a = min(stats[i, -1], stats[j, -1]) / max(stats[i, -1], stats[j, -1])
+        if a < 0.5:
+            distances[i, j] = float('inf')
+        else:
+            chi = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
+            distances[i, j] = chi * a
+limiar = np.percentile(distances, 40)
 
 distances = (distances <= limiar).sum(axis=1)
 
@@ -96,10 +110,12 @@ fig, ax = plt.subplots()
 ax.imshow(image)
 for i, stat in enumerate(stats):
     matches = distances[i]
+    if matches > 1:
+        continue
     x, y, w, h, a = stat
-    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='b',facecolor='none')
+    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='r',facecolor='none')
     ax.add_patch(r)
-    ax.text(x, y, str(matches))
+    # ax.text(x, y, str(matches))
 
 
 # ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
