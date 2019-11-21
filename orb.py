@@ -13,6 +13,7 @@ from skimage.morphology import selem
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import util
+from test import limiar
 
 WINDOW_SIZE=16
 THRESH_PERCENTILE=5
@@ -21,7 +22,7 @@ BLUR=True
 N_BINS=50
 N_CELLS=4
 ORB_FEATURES=200
-IMAGE='samples/portinari.jpg'
+IMAGE='samples/img2.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -64,6 +65,14 @@ if BLUR:
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
+
+l = limiar(gray, 5)
+plt.imshow(l - gray)
+plt.show()
+sys.exit()
+
+
+
 threshold = np.percentile(similarity_map.flatten(), 100 - THRESH_PERCENTILE)
 binary_similarity_map = (similarity_map > threshold).astype(np.uint8)
 
