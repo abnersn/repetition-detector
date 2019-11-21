@@ -1,0 +1,26 @@
+<annotation verified="yes">
+	<folder>dataset</folder>
+	<filename>img8.jpg</filename>
+	<path>/home/abner/Documentos/Mestrado/RPV/trabalho/dataset/img8.jpg</path>
+	<source>
+		<database>Unknown</database>
+	</source>
+	<size>
+		<width>800</width>
+		<height>600</height>
+		<depth>3</depth>
+	</size>
+	<segmented>0</segmented>
+	<object>
+		<name>object</name>
+		<pose>Unspecified</pose>
+		<truncated>0</truncated>
+		<difficult>0</difficult>
+		<bndbox>
+			<xmin>281</xmin>
+			<ymin>157</ymin>
+			<xmax>614</xmax>
+			<ymax>392</ymax>
+		</bndbox>
+	</object>
+</annotation>
