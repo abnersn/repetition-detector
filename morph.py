@@ -3,12 +3,13 @@ import cv2 as cv
 from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from skimage.feature import hog
 from skimage.morphology import reconstruction
 import util
 
 SIZE = 7
 THRESH_PERCENTILE = 25
-IMAGE = 'samples/img1.jpg'
+IMAGE = 'samples/img6.jpg'
 FEATURE_PERCENTILE=50
 N_BINS=40
 N_CELLS=5
@@ -43,45 +44,19 @@ thresh_window_size = int(np.round(thresh_window_size) * 2 + 1)
 binary = cv.adaptiveThreshold(res, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, thresh_window_size, 0)
 binary = cv.medianBlur(binary, 5)
 
+fd, hog_image = hog(image, orientations=8, pixels_per_cell=(8, 8), cells_per_block=(4, 4), visualize=True, multichannel=True)
+
 ################
 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary)
 stats = np.delete(stats, 0, 0)
-n_bboxes = stats.shape[0]
-
-# Compute features
-gray_blur = cv.GaussianBlur(gray, (3,3), 3)
-features = np.zeros((stats.shape[0], N_BINS * N_CELLS**2), dtype=np.float32)
-for i in range(n_bboxes):
-    x, y, w, h, a = stats[i]
-    bbox = gray_blur[y:y+h, x:x+h]
-    features[i] = util.compute_features(bbox, N_BINS, N_CELLS)
-
-distances = np.zeros((features.shape[0], features.shape[0]))
-for i in range(n_bboxes):
-    area_i = stats[i, -1]
-    for j in range(n_bboxes):
-        area_j = stats[j, -1]
-        a = min(area_i, area_j) / max(area_i, area_j)
-        if a < 0.2:
-            distances[i, j] = float('inf')
-        else:
-            chi = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi * a
-limiar = np.percentile(distances, FEATURE_PERCENTILE)
-
-distances = (distances <= limiar).sum(axis=1)
 
 fig, ax = plt.subplots()
-ax.imshow(image)
+ax.imshow(hog_image)
 for i, stat in enumerate(stats):
-    matches = distances[i]
-    if matches > 0.05 * max(distances):
-        continue
     x, y, w, h, a = stat
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
     ax.add_patch(r)
-    ax.text(x, y, str(matches))
 
 plt.show()

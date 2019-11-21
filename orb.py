@@ -8,21 +8,20 @@ from matplotlib.patches import Rectangle
 from scipy.ndimage import shift
 from scipy.stats import mode
 from skimage import filters
-from skimage.feature import local_binary_pattern
+from skimage.feature import local_binary_pattern, match_template
 from skimage.morphology import selem
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import util
-from test import limiar
 
-WINDOW_SIZE=16
+WINDOW_SIZE=32
 THRESH_PERCENTILE=5
 FEATURE_PERCENTILE=40
 BLUR=True
 N_BINS=50
 N_CELLS=4
 ORB_FEATURES=200
-IMAGE='samples/img2.jpg'
+IMAGE='samples/img1.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -49,30 +48,17 @@ labels = clusterizer.fit_predict(distances)
 
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
-patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
-patch = patch.flatten()
-
-patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
-patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
-patches = patches ^ patch
-similarity_map = patches.sum(axis=2)
+patch = gray[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
+similarity_map = match_template(gray, patch)
 
 if BLUR:
     similarity_map = filters.gaussian(similarity_map)
 
-# plt.imshow(similarity_map)
-# plt.show()
+plt.imshow(similarity_map)
+plt.show()
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
-
-l = limiar(gray, 5)
-plt.imshow(l - gray)
-plt.show()
-sys.exit()
-
-
-
 threshold = np.percentile(similarity_map.flatten(), 100 - THRESH_PERCENTILE)
 binary_similarity_map = (similarity_map > threshold).astype(np.uint8)
 
@@ -83,11 +69,10 @@ binary_similarity_map = cv.medianBlur(binary_similarity_map, filter_size)
 binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 2, filter_size + 2), np.uint8))
 
 binary_similarity_map = shift(binary_similarity_map, WINDOW_SIZE//2)
-# plt.figure(1)
-# plt.imshow(image)
-# plt.imshow(binary_similarity_map, cmap='hot', alpha=0.2)
-# plt.show()
-# sys.exit()
+plt.figure(1)
+plt.imshow(image)
+plt.imshow(binary_similarity_map, cmap='hot', alpha=0.2)
+plt.show()
 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
@@ -127,7 +112,7 @@ ax.imshow(image)
 for i, stat in enumerate(stats):
     matches = distances[i]
     if matches > 0.05 * max(distances):
-        continue
+        pass
     x, y, w, h, a = stat
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
     ax.add_patch(r)
