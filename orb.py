@@ -14,14 +14,13 @@ from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import util
 
-WINDOW_SIZE=16
+PATCH_SIZES=[8, 16, 32]
 THRESH_PERCENTILE=5
 FEATURE_PERCENTILE=40
-BLUR=True
-N_BINS=50
+N_BINS=40
 N_CELLS=4
 ORB_FEATURES=200
-IMAGE='samples/portinari.jpg'
+IMAGE='samples/img3.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -42,43 +41,43 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
-# plt.imshow(image)
-# plt.scatter(kps[:, 0], kps[:, 1], labels, c='yellow')
-# plt.show()
+# Gets patches from the most frequent feature
+similarity_maps = []
+for size in PATCH_SIZES:
+    x, y = kps[labels == mode(labels)[0]][0].astype(int)
+    patch = edges[y - size // 2:y + size // 2, x - size // 2:x + size // 2]
+    patch = patch.flatten()
 
-# Gets a single patch from the most frequent feature
-x, y = kps[labels == mode(labels)[0]][0].astype(int)
-patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
-patch = patch.flatten()
-
-patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
-patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
-patches = patches ^ patch
-similarity_map = patches.sum(axis=2)
-
-if BLUR:
+    padded_edges = np.pad(edges, size // 2)[:, :, None]
+    patches = util.patchify(padded_edges, (size, size))
+    patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
+    patches = patches & patch
+    similarity_map = patches.sum(axis=2)
     similarity_map = filters.gaussian(similarity_map)
 
-# plt.imshow(similarity_map)
-# plt.show()
+    similarity_map = similarity_map / similarity_map.max()
+    similarity_maps.append(similarity_map)
 
-# Normalizes and binarizes feature map
-similarity_map = similarity_map / similarity_map.max()
+similarity_map = np.stack(similarity_maps, axis=2)
+similarity_map = similarity_map.sum(axis=2)
+
+plt.imshow(similarity_map)
+plt.show()
+
 threshold = np.percentile(similarity_map.flatten(), 100 - THRESH_PERCENTILE)
 binary_similarity_map = (similarity_map > threshold).astype(np.uint8)
 
 # Filters noise
 filter_size = int(np.sqrt(np.prod(image.shape) * 5.0e-6))
 filter_size = filter_size * 2 + 1
+kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (filter_size + 2, filter_size + 2))
 binary_similarity_map = cv.medianBlur(binary_similarity_map, filter_size)
-binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 2, filter_size + 2), np.uint8))
+binary_similarity_map = cv.dilate(binary_similarity_map, kernel)
 
-binary_similarity_map = shift(binary_similarity_map, WINDOW_SIZE//2)
-# plt.figure(1)
-# plt.imshow(image)
-# plt.imshow(binary_similarity_map, cmap='hot', alpha=0.2)
-# plt.show()
-# sys.exit()
+plt.imshow(image)
+plt.imshow(binary_similarity_map, cmap='hot', alpha=0.3)
+plt.show()
+
 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
@@ -118,7 +117,7 @@ ax.imshow(image)
 for i, stat in enumerate(stats):
     matches = distances[i]
     if matches > 0.05 * max(distances):
-        continue
+        pass
     x, y, w, h, a = stat
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
     ax.add_patch(r)
