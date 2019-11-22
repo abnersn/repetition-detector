@@ -24,9 +24,6 @@ IMAGE='samples/portinari.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
-dx = cv.Sobel(gray, cv.CV_32F, 1, 0, ksize=1)
-dy = cv.Sobel(gray, cv.CV_32F, 0, 1, ksize=1)
-mag, angle = cv.cartToPolar(dx, dy, angleInDegrees=True)
 edges = cv.Canny(gray, 255 // 2, 255).astype(bool)
 
 # Kernels for filtering.
@@ -90,13 +87,13 @@ similarity_map = similarity_map.astype(np.uint8)
 limiar = skimage.filters.threshold_triangle(similarity_map)
 bmap = similarity_map > limiar
 bmap = morphology.area_opening(bmap.astype(int), 12).astype(np.uint8)
-border_width = int(sum(PATCH_SIZES) * 1.5)
+border_width = int(sum(PATCH_SIZES))
 
 # Removes detections close to the border.
-bmap[0:PATCH_SIZES[-1], :] = 1
-bmap[-PATCH_SIZES[-1]:-1, :] = 1
-bmap[:, -PATCH_SIZES[-1]:-1] = 1
-bmap[:, 0:PATCH_SIZES[-1]] = 1
+bmap[0:border_width, :] = 1
+bmap[-border_width:-1, :] = 1
+bmap[:, -border_width:-1] = 1
+bmap[:, 0:border_width] = 1
 bmap = segmentation.flood_fill(bmap, (0, 0), 0)
 
 # Computes bounding boxes
@@ -127,9 +124,8 @@ for i, stat in enumerate(stats):
 bbox_features = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
-    bbox_mag = mag[y:y+h, x:x+h]
-    bbox_angle = angle[y:y+h, x:x+h]
-    bbox_features[i] = util.compute_features(mag, angle, N_BINS, N_CELLS)
+    bbox = gray[y:y+h, x:x+h]
+    bbox_features[i] = util.compute_features(bbox, N_BINS, N_CELLS)
 
 distances = np.zeros((bbox_features.shape[0], bbox_features.shape[0]))
 for i in range(bbox_features.shape[0]):
