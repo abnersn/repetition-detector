@@ -1,5 +1,6 @@
 import numpy as np
 import cv2 as cv
+from skimage.feature import hog
 
 def hamming_pairwise_distances(X):
     """
@@ -44,5 +45,6 @@ def compute_features(image, nbins=16, cells=3):
     for i in range(cells ** 2):
         feature[i] = np.histogram(angle_grid[i].flatten(), nbins, weights=mag_grid[i].flatten())[0]
         feature[i] /= (1e-4 + np.sqrt(feature[i].dot(feature[i])))
-    return feature.flatten()
+    feature = feature.flatten()
+    return feature / np.linalg.norm(feature)
 

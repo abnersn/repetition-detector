@@ -8,18 +8,19 @@ import skimage
 from PIL import Image
 from matplotlib.patches import Rectangle
 from scipy.stats import trim_mean
-from skimage import filters, morphology
+from skimage import filters, morphology, segmentation
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import util
 
 PATCH_SIZES=[8, 16]
+AREA_DIFF_LIMIAR=0.9
 FEATURE_PERCENTILE=40
 N_BINS=8
 N_CELLS=2
 N_FEATURES=5
 ORB_FEATURES=500
-IMAGE='samples/portinari.jpg'
+IMAGE='samples/img6.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -86,9 +87,13 @@ similarity_map = similarity_map.astype(np.uint8)
 limiar = skimage.filters.threshold_triangle(similarity_map)
 bmap = similarity_map > limiar
 bmap = morphology.area_opening(bmap.astype(int), 12).astype(np.uint8)
-bmap[0:PATCH_SIZES[-1], :] = 255
+border_width = int(sum(PATCH_SIZES) * 1.5)
 
-plt.imshow(bmap)
+bmap[0:PATCH_SIZES[-1], :] = 1
+bmap[-PATCH_SIZES[-1]:-1, :] = 1
+bmap[:, -PATCH_SIZES[-1]:-1] = 1
+bmap[:, 0:PATCH_SIZES[-1]] = 1
+bmap = segmentation.flood_fill(bmap, (0, 0), 0)
 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(bmap)
@@ -97,7 +102,11 @@ stats = np.delete(stats, 0, 0)
 # Clusterize areas
 areas = stats[:, -1]
 limiar = trim_mean(areas, 0.3)
-areas = abs(areas - limiar) / limiar
+area_diffs = abs(areas - limiar) / limiar
+
+# Removes outliers by area
+stats = stats[area_diffs <= AREA_DIFF_LIMIAR, :]
+area_diffs = area_diffs[area_diffs <= AREA_DIFF_LIMIAR]
 
 features_cluster = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
 for i, stat in enumerate(stats):
@@ -113,7 +122,7 @@ for i in range(features_cluster.shape[0]):
             distances[i, j] = float('inf')
         else:
             chi = abs(cv.compareHist(features_cluster[i], features_cluster[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi * a
+            distances[i, j] = chi
 limiar = np.percentile(distances, FEATURE_PERCENTILE)
 
 distances = (distances <= limiar).sum(axis=1)
@@ -132,8 +141,6 @@ distances = (distances <= limiar).sum(axis=1)
 fig, ax = plt.subplots()
 ax.imshow(image)
 for i, stat in enumerate(stats):
-    if (areas[i] > 0.9):
-        continue
     matches = distances[i]
     x, y, w, h, a = stat
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
