@@ -7,6 +7,7 @@ import sys
 import skimage
 from PIL import Image
 from matplotlib.patches import Rectangle
+from scipy.stats import trim_mean
 from skimage import filters, morphology
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
@@ -14,11 +15,11 @@ import util
 
 PATCH_SIZES=[8, 16]
 FEATURE_PERCENTILE=40
-N_BINS=40
-N_CELLS=4
+N_BINS=8
+N_CELLS=2
 N_FEATURES=5
 ORB_FEATURES=500
-IMAGE='samples/img6.jpg'
+IMAGE='samples/portinari.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -84,14 +85,20 @@ similarity_map = similarity_map.astype(np.uint8)
 # Thresholds response map
 limiar = skimage.filters.threshold_triangle(similarity_map)
 bmap = similarity_map > limiar
-area = np.prod(gray.shape) * 5e-4
-# bmap = morphology.area_opening(bmap.astype(int), int(area))
+bmap = morphology.area_opening(bmap.astype(int), 12).astype(np.uint8)
+bmap[0:PATCH_SIZES[-1], :] = 255
+
 plt.imshow(bmap)
-plt.show()
 
 # Computes bounding boxes
-_, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
+_, _, stats, _ = cv.connectedComponentsWithStats(bmap)
 stats = np.delete(stats, 0, 0)
+
+# Clusterize areas
+areas = stats[:, -1]
+limiar = trim_mean(areas, 0.3)
+areas = abs(areas - limiar) / limiar
+
 features_cluster = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
@@ -122,17 +129,15 @@ distances = (distances <= limiar).sum(axis=1)
 #     plt.show()
 
 #
-# fig, ax = plt.subplots()
-# ax.imshow(image)
-# for i, stat in enumerate(stats):
-#     matches = distances[i]
-#     if matches > 0.05 * max(distances):
-#         pass
-#     x, y, w, h, a = stat
-#     r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
-#     ax.add_patch(r)
-#     ax.text(x, y, str(matches))
-#
-#
-# # ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
-# plt.show()
+fig, ax = plt.subplots()
+ax.imshow(image)
+for i, stat in enumerate(stats):
+    if (areas[i] > 0.9):
+        continue
+    matches = distances[i]
+    x, y, w, h, a = stat
+    r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
+    ax.add_patch(r)
+    ax.text(x, y, str(matches))
+
+plt.show()
