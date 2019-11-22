@@ -20,7 +20,7 @@ N_BINS=8
 N_CELLS=2
 N_FEATURES=5
 ORB_FEATURES=500
-IMAGE='samples/img6.jpg'
+IMAGE='samples/portinari.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -101,12 +101,23 @@ stats = np.delete(stats, 0, 0)
 
 # Clusterize areas
 areas = stats[:, -1]
-limiar = trim_mean(areas, 0.3)
-area_diffs = abs(areas - limiar) / limiar
+avg_area = trim_mean(areas, 0.3)
+area_diffs = abs(areas - avg_area) / avg_area
 
 # Removes outliers by area
 stats = stats[area_diffs <= AREA_DIFF_LIMIAR, :]
 area_diffs = area_diffs[area_diffs <= AREA_DIFF_LIMIAR]
+
+# Normalize bbox by areas
+for i, stat in enumerate(stats):
+    x, y, w, h, a = stat
+    diff = np.sqrt(avg_area * 2 / a)
+    x += (w - w * diff) / 2
+    y += (h - h * diff) / 2
+    w *= diff
+    h *= diff
+    new_stat = np.array([x, y, w, h, w * h])
+    stats[i] = np.round(new_stat)
 
 features_cluster = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
 for i, stat in enumerate(stats):
@@ -117,12 +128,8 @@ for i, stat in enumerate(stats):
 distances = np.zeros((features_cluster.shape[0], features_cluster.shape[0]))
 for i in range(features_cluster.shape[0]):
     for j in range(features_cluster.shape[0]):
-        a = min(stats[i, -1], stats[j, -1]) / max(stats[i, -1], stats[j, -1])
-        if a < 0.5:
-            distances[i, j] = float('inf')
-        else:
-            chi = abs(cv.compareHist(features_cluster[i], features_cluster[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi
+        chi = abs(cv.compareHist(features_cluster[i], features_cluster[j], cv.HISTCMP_CHISQR))
+        distances[i, j] = chi
 limiar = np.percentile(distances, FEATURE_PERCENTILE)
 
 distances = (distances <= limiar).sum(axis=1)
