@@ -16,7 +16,7 @@ import util
 PATCH_SIZES=[8, 16]
 AREA_DIFF_LIMIAR=0.9
 FEATURE_PERCENTILE=40
-N_BINS=8
+N_BINS=9
 N_CELLS=2
 N_FEATURES=5
 ORB_FEATURES=500
@@ -24,6 +24,9 @@ IMAGE='samples/portinari.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
+dx = cv.Sobel(gray, cv.CV_32F, 1, 0, ksize=1)
+dy = cv.Sobel(gray, cv.CV_32F, 0, 1, ksize=1)
+mag, angle = cv.cartToPolar(dx, dy, angleInDegrees=True)
 edges = cv.Canny(gray, 255 // 2, 255).astype(bool)
 
 # Kernels for filtering.
@@ -54,10 +57,10 @@ frequent_features = counts.argsort()[-N_FEATURES:]
 # Gets patches from the most frequent feature
 similarity_maps = []
 for feature_index in frequent_features:
-    features_cluster = kps[labels == feature_index]
+    bbox_features = kps[labels == feature_index]
     for size in PATCH_SIZES:
         # Gets one sample from the cluster
-        x, y = features_cluster[0].astype(int)
+        x, y = bbox_features[0].astype(int)
         patch = edges[y - size // 2:y + size // 2, x - size // 2:x + size // 2]
         patch = patch.flatten()
 
@@ -72,7 +75,7 @@ for feature_index in frequent_features:
         similarity_map = filters.gaussian(similarity_map, size / 2)
 
         # Weights map by the number of elements in the cluster
-        similarity_map = similarity_map * features_cluster.shape[0]
+        similarity_map = similarity_map * bbox_features.shape[0]
 
         similarity_maps.append(similarity_map)
 
@@ -89,6 +92,7 @@ bmap = similarity_map > limiar
 bmap = morphology.area_opening(bmap.astype(int), 12).astype(np.uint8)
 border_width = int(sum(PATCH_SIZES) * 1.5)
 
+# Removes detections close to the border.
 bmap[0:PATCH_SIZES[-1], :] = 1
 bmap[-PATCH_SIZES[-1]:-1, :] = 1
 bmap[:, -PATCH_SIZES[-1]:-1] = 1
@@ -119,16 +123,19 @@ for i, stat in enumerate(stats):
     new_stat = np.array([x, y, w, h, w * h])
     stats[i] = np.round(new_stat)
 
-features_cluster = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
+# Computes features
+bbox_features = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
-    bbox = gray[y:y+h, x:x+h]
-    features_cluster[i] = util.compute_features(bbox, N_BINS, N_CELLS)
+    bbox_mag = mag[y:y+h, x:x+h]
+    bbox_angle = angle[y:y+h, x:x+h]
+    bbox_features[i] = util.compute_features(mag, angle, N_BINS, N_CELLS)
 
-distances = np.zeros((features_cluster.shape[0], features_cluster.shape[0]))
-for i in range(features_cluster.shape[0]):
-    for j in range(features_cluster.shape[0]):
-        chi = abs(cv.compareHist(features_cluster[i], features_cluster[j], cv.HISTCMP_CHISQR))
+distances = np.zeros((bbox_features.shape[0], bbox_features.shape[0]))
+for i in range(bbox_features.shape[0]):
+    i_ratio = stats[i, 0] / stats[i, 1]
+    for j in range(bbox_features.shape[0]):
+        chi = abs(cv.compareHist(bbox_features[i], bbox_features[j], cv.HISTCMP_CHISQR))
         distances[i, j] = chi
 limiar = np.percentile(distances, FEATURE_PERCENTILE)
 
@@ -150,7 +157,8 @@ ax.imshow(image)
 for i, stat in enumerate(stats):
     matches = distances[i]
     x, y, w, h, a = stat
-    r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
+    color = 'r' if matches == distances.min() else 'b'
+    r = Rectangle((x, y), w, h, linewidth=1,edgecolor=color,facecolor='none')
     ax.add_patch(r)
     ax.text(x, y, str(matches))
 

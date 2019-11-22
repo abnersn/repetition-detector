@@ -35,16 +35,15 @@ def gridify(array, cells):
     grid = [np.array_split(b, cells, axis=1) for b in np.array_split(array, cells, axis=0)]
     return [g for v in grid for g in v]
 
-def compute_features(image, nbins=16, cells=3):
-    dx = cv.Sobel(image, cv.CV_32F, 1, 0, ksize=1)
-    dy = cv.Sobel(image, cv.CV_32F, 0, 1, ksize=1)
-    mag, angle = cv.cartToPolar(dx, dy, angleInDegrees=True)
+def compute_features(mag, angle, nbins, cells):
     mag_grid = gridify(mag, cells)
     angle_grid = gridify(angle, cells)
     feature = np.zeros((cells**2, nbins))
     for i in range(cells ** 2):
         feature[i] = np.histogram(angle_grid[i].flatten(), nbins, weights=mag_grid[i].flatten())[0]
-        feature[i] /= (1e-4 + np.sqrt(feature[i].dot(feature[i])))
+        norm = np.linalg.norm(feature[i])
+        if norm > 0:
+            feature[i] = feature[i] / norm
     feature = feature.flatten()
-    return feature / np.linalg.norm(feature)
+    return feature
 
