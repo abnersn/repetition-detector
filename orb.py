@@ -18,7 +18,7 @@ WINDOW_SIZE=16
 PERCENTILE=5
 BLUR=True
 ORB_FEATURES=200
-IMAGE='samples/img3.jpg'
+IMAGE='samples/portinari.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
@@ -49,6 +49,7 @@ x, y = kps[labels == mode(labels)[0]][0].astype(int)
 patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
 patch = patch.flatten()
 
+edges = np.pad(edges, WINDOW_SIZE//2)
 patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
 patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
 patches = patches ^ patch
@@ -74,9 +75,10 @@ binary_similarity_map = cv.dilate(binary_similarity_map, np.ones((filter_size + 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
 stats = np.delete(stats, 0, 0)
-n_bins = 40
+n_bins = 30
 cells = 4
 features = np.zeros((stats.shape[0], n_bins * cells**2), dtype=np.float32)
+gray = np.pad(gray, WINDOW_SIZE // 2)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
     bbox = gray[y:y+h, x:x+h]
@@ -111,11 +113,11 @@ ax.imshow(image)
 for i, stat in enumerate(stats):
     matches = distances[i]
     if matches > 1:
-        continue
+        pass
     x, y, w, h, a = stat
     r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor='r',facecolor='none')
     ax.add_patch(r)
-    # ax.text(x, y, str(matches))
+    ax.text(x, y, str(matches))
 
 
 # ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
