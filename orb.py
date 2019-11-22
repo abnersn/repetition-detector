@@ -91,7 +91,6 @@ binary_similarity_map = cv.erode(binary_similarity_map, kernel_s)
 plt.imshow(binary_similarity_map, cmap='hot')
 plt.show()
 
-
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(binary_similarity_map)
 stats = np.delete(stats, 0, 0)
