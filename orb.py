@@ -9,7 +9,7 @@ from scipy.ndimage import shift
 from scipy.stats import mode
 from skimage import filters
 from skimage.feature import local_binary_pattern
-from skimage.morphology import selem
+from skimage.morphology import selem, reconstruction
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
 import util
@@ -19,12 +19,20 @@ THRESH_PERCENTILE=5
 FEATURE_PERCENTILE=40
 N_BINS=40
 N_CELLS=4
-ORB_FEATURES=200
-IMAGE='samples/img3.jpg'
+N_FEATURES=4
+ORB_FEATURES=500
+IMAGE='samples/portinari.jpg'
 
 image = np.array(Image.open(IMAGE))
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
 edges = cv.Canny(gray, 255 // 2, 255).astype(bool)
+
+# Kernels for filtering.
+filter_size = int(np.sqrt(np.prod(image.shape) * 5.0e-6))
+filter_size = filter_size * 2 + 1
+kernel_s = cv.getStructuringElement(cv.MORPH_ELLIPSE, (filter_size, filter_size))
+kernel_m = cv.getStructuringElement(cv.MORPH_ELLIPSE, (filter_size + 2, filter_size + 2))
+kernel_b = cv.getStructuringElement(cv.MORPH_ELLIPSE, (filter_size + 4, filter_size + 4))
 
 # Computes features
 extractor = cv.ORB_create(nfeatures=ORB_FEATURES)
@@ -41,41 +49,46 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
+# Gets most frequent features
+counts, _ = np.histogram(labels, bins=(labels.max() - labels.min()))
+frequent_features = counts.argsort()[-N_FEATURES:]
+
 # Gets patches from the most frequent feature
 similarity_maps = []
-for size in PATCH_SIZES:
-    x, y = kps[labels == mode(labels)[0]][0].astype(int)
-    patch = edges[y - size // 2:y + size // 2, x - size // 2:x + size // 2]
-    patch = patch.flatten()
+for feature_index in frequent_features:
+    for size in PATCH_SIZES:
+        x, y = kps[labels == feature_index][0].astype(int)
+        patch = edges[y - size // 2:y + size // 2, x - size // 2:x + size // 2]
+        patch = patch.flatten()
 
-    padded_edges = np.pad(edges, size // 2)[:, :, None]
-    patches = util.patchify(padded_edges, (size, size))
-    patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
-    patches = patches & patch
-    similarity_map = patches.sum(axis=2)
-    similarity_map = filters.gaussian(similarity_map)
+        padded_edges = np.pad(edges, size // 2)[:, :, None]
+        patches = util.patchify(padded_edges, (size, size))
+        patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
+        patches = patches & patch
+        similarity_map = patches.sum(axis=2)
+        similarity_map = filters.gaussian(similarity_map)
 
-    similarity_map = similarity_map / similarity_map.max()
-    similarity_maps.append(similarity_map)
+        similarity_map = similarity_map / similarity_map.max()
+        similarity_maps.append(similarity_map)
 
 similarity_map = np.stack(similarity_maps, axis=2)
 similarity_map = similarity_map.sum(axis=2)
+similarity_map = similarity_map / similarity_map.max() * 255
+similarity_map = similarity_map.astype(np.uint8)
 
-plt.imshow(similarity_map)
-plt.show()
-
-threshold = np.percentile(similarity_map.flatten(), 100 - THRESH_PERCENTILE)
-binary_similarity_map = (similarity_map > threshold).astype(np.uint8)
-
-# Filters noise
-filter_size = int(np.sqrt(np.prod(image.shape) * 5.0e-6))
-filter_size = filter_size * 2 + 1
-kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (filter_size + 2, filter_size + 2))
-binary_similarity_map = cv.medianBlur(binary_similarity_map, filter_size)
-binary_similarity_map = cv.dilate(binary_similarity_map, kernel)
-
-plt.imshow(image)
-plt.imshow(binary_similarity_map, cmap='hot', alpha=0.3)
+# _, binary_similarity_map = cv.threshold(similarity_map, 0, 255, cv.THRESH_OTSU)
+binary_similarity_map = cv.adaptiveThreshold(
+    similarity_map,
+    255,
+    cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+    cv.THRESH_BINARY,
+    (min(image.shape[0:2]) // 8) * 2 + 1,
+    0
+)
+binary_similarity_map = cv.erode(binary_similarity_map, kernel_s)
+# binary_similarity_map = cv.medianBlur(binary_similarity_map, kernel_s.shape[0])
+# plt.imshow(image)
+plt.imshow(binary_similarity_map, cmap='hot')
 plt.show()
 
 
