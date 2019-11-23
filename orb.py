@@ -4,7 +4,7 @@ import numpy as np
 import cv2 as cv
 from PIL import Image
 from matplotlib.patches import Rectangle
-from scipy.stats import mode, wasserstein_distance
+from scipy.stats import mode, wasserstein_distance, trim_mean
 from skimage import filters, segmentation
 from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
@@ -21,7 +21,7 @@ ORB_FEATURES=200
 PADDING=5
 N_BINS = 12
 N_CELLS = 3
-IMAGE='samples/img10.jpg'
+IMAGE='samples/img11.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
@@ -104,6 +104,12 @@ for i in range(n_components):
 limiar = np.percentile(distances, DISTANCE_PERCENTILE)
 matches = (distances <= limiar).sum(axis=1)
 
+is_different_match = (matches == matches.min())
+
+distance_sum = trim_mean(distances, 0.1, axis=1) * is_different_match
+is_different_distance = distance_sum == distance_sum.max()
+is_different = is_different_match & is_different_distance
+
 end = time() - start
 print('Total running time {}'.format(end))
 
@@ -111,11 +117,11 @@ fig, ax = plt.subplots()
 ax.imshow(image)
 for i in range(n_components):
     m = matches[i]
-    # if m != matches.min():
-    #     continue
-    color = 'r' if m == matches.min() else 'b'
+    if m != matches.min():
+        continue
+    color = 'r' if is_different[i] else 'b'
     x, y, w, h, a = stats[i]
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor=color,facecolor='none')
     ax.add_patch(r)
-    ax.text(x, y, str(m))
+    # ax.text(x, y, distance_sum[i])
 plt.show()
