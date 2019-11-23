@@ -16,11 +16,10 @@ import util
 
 WINDOW_SIZE=16
 PERCENTILE=5
-BLUR=True
 ORB_FEATURES=200
-n_bins = 20
-cells = 2
-IMAGE='samples/img4.jpg'
+n_bins = 40
+cells = 4
+IMAGE='samples/portinari.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
@@ -42,10 +41,6 @@ margin = np.quantile(distances, 0.04)
 clusterizer = DBSCAN(eps=margin, metric='precomputed')
 labels = clusterizer.fit_predict(distances)
 
-# plt.imshow(image)
-# plt.scatter(kps[:, 0], kps[:, 1], labels, c='yellow')
-# plt.show()
-
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
 patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
@@ -56,12 +51,7 @@ patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
 patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
 patches = patches ^ patch
 similarity_map = patches.sum(axis=2)
-
-if BLUR:
-    similarity_map = filters.gaussian(similarity_map)
-
-# plt.imshow(similarity_map)
-# plt.show()
+similarity_map = filters.gaussian(similarity_map)
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
@@ -88,8 +78,17 @@ features = np.zeros((stats.shape[0], n_bins * cells**2), dtype=np.float32)
 gray = np.pad(gray, WINDOW_SIZE // 2)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
+    x -= 5
+    y -= 5
+    w += 10
+    h += 10
+    a = w * h
+    stats[i] = np.array([x,y,w,h, a])
     bbox = gray[y:y+h, x:x+h]
     features[i] = util.compute_features(bbox, n_bins, cells)
+
+average_bbox_size = stats[:, 2:4].mean(axis=0)
+print(average_bbox_size)
 
 distances = np.zeros((features.shape[0], features.shape[0]))
 for i in range(features.shape[0]):
@@ -102,18 +101,21 @@ for i in range(features.shape[0]):
             distances[i, j] = chi * a
 limiar = np.percentile(distances, 40)
 
-distances = (distances <= limiar).sum(axis=1)
+matches = (distances <= limiar).sum(axis=1)
+distances[distances > 1e30] = 0
+dsum = distances.sum(axis=1)
+mean_dsum = dsum.mean()
+print(mean_dsum)
 
 fig, ax = plt.subplots()
 ax.imshow(image)
 for i, stat in enumerate(stats):
-    matches = distances[i]
-    color = 'r' if matches == distances.min() else 'b'
+    m = matches[i]
+    # if m != matches.min():
+    #     continue
+    color = 'r' if m == matches.min() else 'b'
     x, y, w, h, a = stat
-    r = Rectangle((x-5, y-5), w+10, h+10, linewidth=1,edgecolor=color,facecolor='none')
+    r = Rectangle((x, y), w, h, linewidth=1,edgecolor=color,facecolor='none')
     ax.add_patch(r)
-    ax.text(x, y, str(matches))
-
-
-# ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
+    ax.text(x, y, str(m))
 plt.show()

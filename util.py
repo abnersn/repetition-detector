@@ -1,5 +1,7 @@
 import numpy as np
 import cv2 as cv
+from skimage import filters
+
 
 def hamming_pairwise_distances(X):
     """
@@ -35,6 +37,7 @@ def gridify(array, cells):
     return [g for v in grid for g in v]
 
 def compute_features(image, nbins=16, cells=3):
+    image = cv.GaussianBlur(image, (3,3), 3)
     dx = cv.Sobel(image, cv.CV_32F, 1, 0, ksize=1)
     dy = cv.Sobel(image, cv.CV_32F, 0, 1, ksize=1)
     mag, angle = cv.cartToPolar(dx, dy, angleInDegrees=True)
