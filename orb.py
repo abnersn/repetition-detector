@@ -19,8 +19,8 @@ PERCENTILE=5
 BLUR=True
 ORB_FEATURES=200
 n_bins = 20
-cells = 1
-IMAGE='samples/img5.jpg'
+cells = 2
+IMAGE='samples/img4.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
