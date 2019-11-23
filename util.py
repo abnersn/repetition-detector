@@ -43,6 +43,8 @@ def compute_features(image, nbins=16, cells=3):
     feature = np.zeros((cells**2, nbins))
     for i in range(cells ** 2):
         feature[i] = np.histogram(angle_grid[i].flatten(), nbins, weights=mag_grid[i].flatten())[0]
-        feature[i] /= (1e-4 + np.sqrt(feature[i].dot(feature[i])))
+        norm = np.linalg.norm(feature[i])
+        if norm > 0:
+            feature[i] /= norm
     return feature.flatten()
 
