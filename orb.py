@@ -2,27 +2,28 @@ from time import time
 
 import numpy as np
 import cv2 as cv
-import sys
 from PIL import Image
 from matplotlib.patches import Rectangle
-from scipy.ndimage import shift
-from scipy.stats import mode
-from skimage import filters
-from skimage.feature import local_binary_pattern, match_template
-from skimage.morphology import selem
+from scipy.stats import mode, wasserstein_distance, trim_mean
+from skimage import filters, segmentation
+from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.metrics import pairwise_distances
+
 import util
 
-WINDOW_SIZE=32
-THRESH_PERCENTILE=5
-FEATURE_PERCENTILE=40
-BLUR=True
-N_BINS=50
-N_CELLS=4
+PATCH_SIZE=16
+THRESHOLD_PERCENTILE=5
+DISTANCE_PERCENTILE=50
 ORB_FEATURES=200
-IMAGE='samples/img1.jpg'
+PADDING=5
+N_BINS = 12
+N_CELLS = 3
+IMAGE='samples/img13.jpg'
 
+# Loads image
 image = np.array(Image.open(IMAGE))
 start = time()
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
@@ -45,19 +46,20 @@ labels = clusterizer.fit_predict(distances)
 
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
-patch = gray[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
-similarity_map = match_template(gray, patch)
+patch = edges[y - PATCH_SIZE // 2:y + PATCH_SIZE // 2, x - PATCH_SIZE // 2:x + PATCH_SIZE // 2]
+patch = patch.flatten()
 
-if BLUR:
-    similarity_map = filters.gaussian(similarity_map)
-
-plt.imshow(similarity_map)
-plt.show()
+edges = np.pad(edges, PATCH_SIZE // 2)
+patches = util.patchify(edges[:, :, None], (PATCH_SIZE, PATCH_SIZE))
+patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
+patches = patches ^ patch
+similarity_map = patches.sum(axis=2)
+similarity_map = filters.gaussian(similarity_map)
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
-threshold = np.percentile(similarity_map.flatten(), 100 - THRESH_PERCENTILE)
-binary_similarity_map = (similarity_map > threshold).astype(np.uint8)
+threshold = np.percentile(similarity_map.flatten(), 100 - THRESHOLD_PERCENTILE)
+bmap = (similarity_map > threshold).astype(np.uint8)
 
 # Filters noise
 filter_size = int(np.sqrt(np.prod(image.shape) * 5.0e-6))
@@ -72,32 +74,32 @@ bmap[:, -PATCH_SIZE:-1] = 1
 bmap[:, 0:PATCH_SIZE] = 1
 bmap = segmentation.flood_fill(bmap, (0, 0), 0)
 
-binary_similarity_map = shift(binary_similarity_map, WINDOW_SIZE//2)
-plt.figure(1)
-plt.imshow(image)
-plt.imshow(binary_similarity_map, cmap='hot', alpha=0.2)
-plt.show()
-
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(bmap)
 stats = np.delete(stats, 0, 0)
-features = np.zeros((stats.shape[0], N_BINS * N_CELLS**2), dtype=np.float32)
-for i, stat in enumerate(stats):
-    x, y, w, h, a = stat
+n_components = stats.shape[0]
+
+features = []
+gray = np.pad(gray, PATCH_SIZE // 2)
+for i in range(n_components):
+    x, y, w, h, a = stats[i]
+    x -= PADDING
+    y -= PADDING
+    w += PADDING * 2
+    h += PADDING * 2
+    a = w * h
+    stats[i] = np.array([x,y,w,h, a])
     bbox = gray[y:y+h, x:x+h]
-    features[i] = util.compute_features(bbox, N_BINS, N_CELLS)
+    f = util.compute_features(bbox, N_BINS, N_CELLS)
+    features.append(f)
 
 distances = np.zeros((n_components, n_components))
 for i in range(n_components):
     for j in range(n_components):
         e = np.sqrt((features[i] - features[j]) ** 2).sum()
         a = min(stats[i, -1], stats[j, -1]) / max(stats[i, -1], stats[j, -1])
-        if a < 0.5:
-            distances[i, j] = float('inf')
-        else:
-            chi = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi * a
-limiar = np.percentile(distances, FEATURE_PERCENTILE)
+        d = wasserstein_distance(features[i], features[j])
+        distances[i, j] = d * e / np.sqrt(a)
 
 limiar = np.percentile(distances, DISTANCE_PERCENTILE)
 matches = (distances <= limiar).sum(axis=1)
@@ -113,15 +115,13 @@ print('Total running time {}'.format(end))
 
 fig, ax = plt.subplots()
 ax.imshow(image)
-for i, stat in enumerate(stats):
-    matches = distances[i]
-    if matches > 0.05 * max(distances):
-        pass
-    x, y, w, h, a = stat
-    r = Rectangle((x, y), w, h, linewidth=1,edgecolor='r',facecolor='none')
+for i in range(n_components):
+    m = matches[i]
+    if m != matches.min():
+        continue
+    color = 'r' if is_different[i] else 'b'
+    x, y, w, h, a = stats[i]
+    r = Rectangle((x, y), w, h, linewidth=1,edgecolor=color,facecolor='none')
     ax.add_patch(r)
-    ax.text(x, y, str(matches))
-
-
-# ax.imshow(binary_similarity_map, cmap='hot', alpha=0.4)
+    # ax.text(x, y, distance_sum[i])
 plt.show()
