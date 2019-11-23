@@ -16,10 +16,10 @@ import util
 
 PATCH_SIZE=16
 THRESHOLD_PERCENTILE=5
-DISTANCE_PERCENTILE=7
+DISTANCE_PERCENTILE=50
 ORB_FEATURES=200
 PADDING=5
-N_BINS = 9
+N_BINS = 12
 N_CELLS = 3
 IMAGE='samples/portinari.jpg'
 
@@ -96,9 +96,10 @@ for i in range(n_components):
 distances = np.zeros((n_components, n_components))
 for i in range(n_components):
     for j in range(n_components):
+        e = np.sqrt((features[i] - features[j]) ** 2).sum()
         a = min(stats[i, -1], stats[j, -1]) / max(stats[i, -1], stats[j, -1])
         d = wasserstein_distance(features[i], features[j])
-        distances[i, j] = d / np.sqrt(a)
+        distances[i, j] = d * e / np.sqrt(a)
 
 limiar = np.percentile(distances, DISTANCE_PERCENTILE)
 matches = (distances <= limiar).sum(axis=1)
