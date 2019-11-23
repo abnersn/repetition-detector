@@ -14,15 +14,18 @@ from sklearn.metrics import pairwise_distances
 
 import util
 
-WINDOW_SIZE=16
-PERCENTILE=5
+PATCH_SIZE=16
+THRESHOLD_PERCENTILE=5
+DISTANCE_PERCENTILE=50
 ORB_FEATURES=200
-n_bins = 40
-cells = 4
+PADDING=5
+N_BINS = 40
+N_CELLS = 4
 IMAGE='samples/portinari.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
+start = time()
 gray = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
 edges = cv.Canny(gray, 255 // 2, 255).astype(bool)
 
@@ -43,11 +46,11 @@ labels = clusterizer.fit_predict(distances)
 
 # Gets a single patch from the most frequent feature
 x, y = kps[labels == mode(labels)[0]][0].astype(int)
-patch = edges[y - WINDOW_SIZE // 2:y + WINDOW_SIZE // 2, x - WINDOW_SIZE // 2:x + WINDOW_SIZE // 2]
+patch = edges[y - PATCH_SIZE // 2:y + PATCH_SIZE // 2, x - PATCH_SIZE // 2:x + PATCH_SIZE // 2]
 patch = patch.flatten()
 
-edges = np.pad(edges, WINDOW_SIZE//2)
-patches = util.patchify(edges[:, :, None], (WINDOW_SIZE, WINDOW_SIZE))
+edges = np.pad(edges, PATCH_SIZE // 2)
+patches = util.patchify(edges[:, :, None], (PATCH_SIZE, PATCH_SIZE))
 patches = patches.reshape((patches.shape[0], patches.shape[1], -1))
 patches = patches ^ patch
 similarity_map = patches.sum(axis=2)
@@ -55,7 +58,7 @@ similarity_map = filters.gaussian(similarity_map)
 
 # Normalizes and binarizes feature map
 similarity_map = similarity_map / similarity_map.max()
-threshold = np.percentile(similarity_map.flatten(), 100 - PERCENTILE)
+threshold = np.percentile(similarity_map.flatten(), 100 - THRESHOLD_PERCENTILE)
 bmap = (similarity_map > threshold).astype(np.uint8)
 
 # Filters noise
@@ -65,30 +68,29 @@ bmap = cv.medianBlur(bmap, filter_size)
 bmap = cv.dilate(bmap, np.ones((filter_size + 2, filter_size + 2), np.uint8))
 
 # Removes detections close to the border.
-bmap[0:WINDOW_SIZE, :] = 1
-bmap[-WINDOW_SIZE:-1, :] = 1
-bmap[:, -WINDOW_SIZE:-1] = 1
-bmap[:, 0:WINDOW_SIZE] = 1
+bmap[0:PATCH_SIZE, :] = 1
+bmap[-PATCH_SIZE:-1, :] = 1
+bmap[:, -PATCH_SIZE:-1] = 1
+bmap[:, 0:PATCH_SIZE] = 1
 bmap = segmentation.flood_fill(bmap, (0, 0), 0)
 
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(bmap)
 stats = np.delete(stats, 0, 0)
-features = np.zeros((stats.shape[0], n_bins * cells**2), dtype=np.float32)
-gray = np.pad(gray, WINDOW_SIZE // 2)
+features = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
+gray = np.pad(gray, PATCH_SIZE // 2)
 for i, stat in enumerate(stats):
     x, y, w, h, a = stat
-    x -= 5
-    y -= 5
-    w += 10
-    h += 10
+    x -= PADDING
+    y -= PADDING
+    w += PADDING * 2
+    h += PADDING * 2
     a = w * h
     stats[i] = np.array([x,y,w,h, a])
     bbox = gray[y:y+h, x:x+h]
-    features[i] = util.compute_features(bbox, n_bins, cells)
+    features[i] = util.compute_features(bbox, N_BINS, N_CELLS)
 
 average_bbox_size = stats[:, 2:4].mean(axis=0)
-print(average_bbox_size)
 
 distances = np.zeros((features.shape[0], features.shape[0]))
 for i in range(features.shape[0]):
@@ -98,14 +100,19 @@ for i in range(features.shape[0]):
             distances[i, j] = float('inf')
         else:
             chi = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi * a
-limiar = np.percentile(distances, 40)
+            distances[i, j] = chi
+limiar = np.percentile(distances, DISTANCE_PERCENTILE)
+if np.isnan(limiar):
+    values = distances.flatten()
+    values[values > 1e20] = -1
+    values[values == -1] = values.max()
+    limiar = np.percentile(values, DISTANCE_PERCENTILE)
 
 matches = (distances <= limiar).sum(axis=1)
-distances[distances > 1e30] = 0
-dsum = distances.sum(axis=1)
-mean_dsum = dsum.mean()
-print(mean_dsum)
+
+end = time() - start
+
+print('Total running time {}'.format(end))
 
 fig, ax = plt.subplots()
 ax.imshow(image)
