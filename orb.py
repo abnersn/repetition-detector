@@ -21,7 +21,7 @@ ORB_FEATURES=200
 PADDING=5
 N_BINS = 12
 N_CELLS = 3
-IMAGE='samples/portinari.jpg'
+IMAGE='samples/img10.jpg'
 
 # Loads image
 image = np.array(Image.open(IMAGE))
