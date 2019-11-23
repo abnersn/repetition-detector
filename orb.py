@@ -4,7 +4,7 @@ import numpy as np
 import cv2 as cv
 from PIL import Image
 from matplotlib.patches import Rectangle
-from scipy.stats import mode
+from scipy.stats import mode, wasserstein_distance
 from skimage import filters, segmentation
 from skimage.feature import local_binary_pattern
 from sklearn.cluster import DBSCAN
@@ -16,11 +16,11 @@ import util
 
 PATCH_SIZE=16
 THRESHOLD_PERCENTILE=5
-DISTANCE_PERCENTILE=50
+DISTANCE_PERCENTILE=7
 ORB_FEATURES=200
 PADDING=5
-N_BINS = 40
-N_CELLS = 4
+N_BINS = 9
+N_CELLS = 3
 IMAGE='samples/portinari.jpg'
 
 # Loads image
@@ -77,10 +77,12 @@ bmap = segmentation.flood_fill(bmap, (0, 0), 0)
 # Computes bounding boxes
 _, _, stats, _ = cv.connectedComponentsWithStats(bmap)
 stats = np.delete(stats, 0, 0)
-features = np.zeros((stats.shape[0], N_BINS * N_CELLS ** 2), dtype=np.float32)
+n_components = stats.shape[0]
+
+features = []
 gray = np.pad(gray, PATCH_SIZE // 2)
-for i, stat in enumerate(stats):
-    x, y, w, h, a = stat
+for i in range(n_components):
+    x, y, w, h, a = stats[i]
     x -= PADDING
     y -= PADDING
     w += PADDING * 2
@@ -88,40 +90,30 @@ for i, stat in enumerate(stats):
     a = w * h
     stats[i] = np.array([x,y,w,h, a])
     bbox = gray[y:y+h, x:x+h]
-    features[i] = util.compute_features(bbox, N_BINS, N_CELLS)
+    f = util.compute_features(bbox, N_BINS, N_CELLS)
+    features.append(f)
 
-average_bbox_size = stats[:, 2:4].mean(axis=0)
-
-distances = np.zeros((features.shape[0], features.shape[0]))
-for i in range(features.shape[0]):
-    for j in range(features.shape[0]):
+distances = np.zeros((n_components, n_components))
+for i in range(n_components):
+    for j in range(n_components):
         a = min(stats[i, -1], stats[j, -1]) / max(stats[i, -1], stats[j, -1])
-        if a < 0.5:
-            distances[i, j] = float('inf')
-        else:
-            chi = abs(cv.compareHist(features[i], features[j], cv.HISTCMP_CHISQR))
-            distances[i, j] = chi
-limiar = np.percentile(distances, DISTANCE_PERCENTILE)
-if np.isnan(limiar):
-    values = distances.flatten()
-    values[values > 1e20] = -1
-    values[values == -1] = values.max()
-    limiar = np.percentile(values, DISTANCE_PERCENTILE)
+        d = wasserstein_distance(features[i], features[j])
+        distances[i, j] = d / np.sqrt(a)
 
+limiar = np.percentile(distances, DISTANCE_PERCENTILE)
 matches = (distances <= limiar).sum(axis=1)
 
 end = time() - start
-
 print('Total running time {}'.format(end))
 
 fig, ax = plt.subplots()
 ax.imshow(image)
-for i, stat in enumerate(stats):
+for i in range(n_components):
     m = matches[i]
     # if m != matches.min():
     #     continue
     color = 'r' if m == matches.min() else 'b'
-    x, y, w, h, a = stat
+    x, y, w, h, a = stats[i]
     r = Rectangle((x, y), w, h, linewidth=1,edgecolor=color,facecolor='none')
     ax.add_patch(r)
     ax.text(x, y, str(m))
